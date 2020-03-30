@@ -1,0 +1,248 @@
+/*TIME OUT and Ider Timer test sketch
+   During testing a Button was used to simulate squelch Trip
+   starts TOT & IDer timers. The output from the repeater's
+   squelch should send a ground when active.
+   By B.Anding
+   1-24-2020,
+   updated 2-7-20, 2-21-2020, 3/21/2020
+   Test Button starts IDer timer and TOT timer.
+   TOT turns off  PTT Pin and waits for Squelch/button release.
+   If released before TOT ends, it resets PTT Pin & resets timer-start-time to current time
+   If TOT reached locks out repeater (turns off transmitter) and wait for Button release.
+   After button is released the next button push restarts TOT timer and countdown cycle
+   ID timer starts counting when button pushed and at the end sends ID message.
+   Courtesy beep added on the release of button.
+   Copyright All rights reserved 1-24-2020
+   For personal Use only
+*/
+unsigned long startMillis;  //some global variables available anywhere in the program
+unsigned long currentMillis;
+unsigned long IderMillis;
+unsigned long SqlMillis;
+////////////// Timmers durations (1000 = 1 second and 60,000 = 1 minute) /////////////////////////
+unsigned long IDer_lng = 20000;// Ider timer length in milli seconds, a minute = 60 x 1000 = 60,000 msec, (60,000 x 10) = 600,000 milli seconds for 10 minutes
+unsigned long Tail_lng = 3000; // Squelch tail 3 seconds = 3000 milli seconds
+unsigned long TOT_lng = 7000;  //Time Out Timer  minute = 60 x 1000 = 60,000 milli seconds, for 3 minutes = 3 x 60,000 = 180,000
+/////////////////////////////////////////////////////////////////////////////////////////////////
+const byte CWPin = A5; // output pin for CWPin tone
+const byte PTTPin = 10; // PTT Pin
+const byte KeyPin = 11; //Key pin output, key connector on CW rigs
+const byte cosPin = 12;  //Pin 12 LED
+const byte interruptPin = 2;
+volatile bool IR_state = LOW;
+volatile bool Tail_state = LOW;
+volatile bool state = LOW;
+volatile bool previous_state = HIGH;
+volatile bool Timer_state = LOW;
+volatile bool IDtimer_state = LOW;
+volatile bool Sql_flag = HIGH;
+
+////////////////////////// PLACE IDer Message HERE, Alphabet code listing in comments at end of Code file ////////////////////////////
+char message [] = {0x06, 0x06, 0x20, 0x0f, 0x1d}; //current message = "AA5OY" Alphabet listing in comments at end of Code file
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+int msglength = sizeof(message) / sizeof(message[0]); // sketch calculates message length, no EOM character needed
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/////////////// CWPin WPM speed, Tone Freq, Output Audio pin, PPT pin, Timer Length  /////
+int dit = 56; // adjust WPM speed here (Slow =  100, Fast = 35)
+int dah = 3 * dit; // sets dah lenght as a fuction of dit length
+int wdsp = 7 * dit;// sets word space  lenght as a fuction of dit length
+int freq = 700; //CWPin tone frequency (500 - 900)
+///////////////////////////////////////////
+
+void setup()
+{
+  pinMode(cosPin, OUTPUT);
+  pinMode(PTTPin, OUTPUT);
+  pinMode(KeyPin, OUTPUT);
+  pinMode (A5, OUTPUT);
+  pinMode(interruptPin, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(interruptPin), IR_detect, FALLING); //CHANGE
+  delay(1000); //wait while initializing controller
+  Sql_tail(Tail_lng);
+}
+////////////// MAIN LOOP  /////////////////////////
+void loop()
+{
+  state = digitalRead(2); // read pin 2 logic level for feedback from squelch input
+  digitalWrite(cosPin, !state); // reverse logic may change to inverse logic, but for me working with inverse logic is a pain
+  if (!Sql_flag)digitalWrite(PTTPin, !state);
+
+  if (!state) // if(!IR_state)when button is press the timer is set to current millis() which starts a new countdown cycle
+  {
+    TOT(TOT_lng); // call Time Out Timer (May consider OOP in capsilation ????)
+    Timer_state = HIGH;// set Timer flag
+    IDtimer_state = HIGH;// set Timer flag
+    Sql_flag = HIGH;// set Timer flag//startMillis = millis();
+    //Sql_tail(Tail_lng);  /// Detect raising edge  of PTTPin pulse (state was held LOW and was released its now HIGH)
+    
+  }
+  if (IDtimer_state) {
+    ID_timer(IDer_lng);
+  }
+  if (state && Sql_flag) {
+    Sql_tail(Tail_lng);
+  }
+  if ( previous_state != state) { ///if(IR_state != previous_state)
+    //courtesy beep
+    SqlMillis = millis();
+    if (digitalRead(2) == HIGH) {
+      previous_state = state;
+      Sql_tail(Tail_lng);
+    }
+  }
+}
+////////// COR Interrupt  ////////////////////
+void IR_detect()
+{
+  IR_state = digitalRead(2);
+  startMillis = millis(); //IR_state = true and start a new cycle count
+
+}
+
+////////// Time Out Timer //////////////////////
+void TOT(unsigned long TOT_lng) {
+
+  currentMillis = millis();  //get the current "time" (actually the number of milliseconds since the program started
+
+  if (IR_state = HIGH && currentMillis - startMillis >= TOT_lng) { //test whether the TOT_lng has elapsed
+
+    startMillis = currentMillis;  // save the start time of the current state.
+    tone(A5, 500, 200); //courtesy beep
+    digitalWrite(cosPin, LOW); // IR_state = false;
+    digitalWrite(PTTPin, LOW);
+    while (IR_state) {
+      if (state) {
+        IR_state = LOW;
+        break;
+      }
+    }
+  }
+}
+
+/////////  Ider TIMER  ////////////////////
+
+void ID_timer(int IDer_lng) {
+  currentMillis = millis();  //get the current "time" (actually the number of milliseconds since the program started
+  if (IDtimer_state && currentMillis - IderMillis >= IDer_lng) { //test whether the TOT_lng has elapsed//if (IR_state = HIGH && startMillis- startMillis >= Timer_lng){  //test whether the period has elapsed
+
+    IderMillis = currentMillis;  // save the start time of the current state.
+    digitalWrite(cosPin, LOW); // IR_state = false;
+    msgReader(); //tone(A5,660,200); //courtesy beep
+    IDtimer_state = LOW;
+  }
+}
+/////////   Sql_tail  ////////////////////
+
+void Sql_tail(int Tail_lng) {
+  currentMillis = millis();  //get the current "time" (actually the number of milliseconds since the program started
+  if (currentMillis - SqlMillis <= 100) tone(A5, 700, 100); //digitalWrite(PTTPin, HIGH);
+  digitalWrite(cosPin, LOW);
+  digitalWrite(PTTPin, HIGH);
+  if (Sql_flag && currentMillis - SqlMillis >= Tail_lng)//IR_state = LOW && if(Timer_state && currentMillis - startMillis>= Tail_lng)test whether the period has elapsed//if (IR_state = HIGH && startMillis- startMillis >= Timer_lng){  //test whether the period has elapsed
+  {
+    SqlMillis = currentMillis;  // save the start time of the current state.
+    digitalWrite(PTTPin, LOW);
+    Sql_flag = LOW;
+  }
+}
+////////// msgReader ///////////////////////////
+
+void msgReader()
+{
+  /// if trx on then wait for carrier to drop  ///////////
+  while (!state) {
+    if (digitalRead(2)) break;
+  }
+  int  element = 0; // letter of message
+  char temp; // letter to eval
+  int LSB = 0; // current bit to read
+  digitalWrite(PTTPin, HIGH); // turn on PTTPin
+
+  for (element = 0; element < msglength ; element ++) //  read CWPin message a letter at a time
+  {
+    temp =  message[element]; // evaluating each message character
+    for (int x = 0;  temp > 1 ; x++) // reads character and checks for End of Character = 1
+    {
+      //digitalWrite(cosPin, !state);
+      LSB = bitRead(temp, 0); //LSB of temp, each loop shifts right one
+      delay(dit);//delay(dah * 1.3); //add element space tone(CWPin, freq, dah);
+
+      if (LSB)
+      {
+        digitalWrite(KeyPin, HIGH); // turn on KeyPin
+        tone(CWPin, freq, dah);//send dah, tone(pin, frequency, duration)
+      }
+
+      else
+      {
+        digitalWrite(KeyPin, HIGH); // turn on KeyPin
+        tone(CWPin, freq, dit);//send dit, tone(pin, frequency, duration)
+      }
+
+      if (LSB)delay(dah); /// dah space between character
+      else delay(dit);///  dit space between character
+
+      temp = temp >> 1;  // shift right one, when temp = 1 quit loop
+      digitalWrite(KeyPin, LOW); // turn off KeyPin
+    }
+    delay(dah); //character space between elements tone(KeyPin, 0, dah);//
+
+  }
+  digitalWrite(cosPin, IR_state); // turn COS-Pin off
+  delay(200); ///Sql_tail(Tail_lng);
+  digitalWrite(PTTPin, !IR_state); //turn  PTTPin off
+}
+
+/**********Letter codes for message play back  **********
+   In line "char message" enter your call sign between {}
+   Use the hex codes 0x06 = A
+   then add a comma {0x06, lookup next letter code
+   {0x06, 0x06, so on and so fore till you get to the last letter
+   which doesn't get a comma it has the closing bracket to take care of that
+   Use the Arduino IDE to compile and load your program
+   char message []={0x06, 0x06, 0x20, 0x0f, 0x1d}; //message = "AA5OY"
+   Check my website for a small message building program for easing message building
+    
+    {0x06, 'a'},
+    {0x11, 'b'},
+    {0x15, 'c'},
+    {0x09, 'd'},
+    {0x02, 'e'},
+    {0x14, 'f'},
+    {0x0b, 'g'},
+    {0x10, 'h'},
+    {0x04, 'i'},
+    {0x1e, 'j'},
+    {0x0d, 'k'},
+    {0x12, 'l'},
+    {0x07, 'm'},
+    {0x05, 'n'},
+    {0x0f, 'o'},
+    {0x16, 'p'},
+    {0x1b, 'q'},
+    {0x0a, 'r'},
+    {0x08, 's'},
+    {0x03, 't'},
+    {0x0c, 'u'},
+    {0x18, 'v'},
+    {0x0e, 'w'},
+    {0x19, 'x'},
+    {0x1d, 'y'},
+    {0x13, 'z'},
+    {0x3e, '1'},
+    {0x3c, '2'},
+    {0x38, '3'},
+    {0x30, '4'},
+    {0x20, '5'},
+    {0x21, '6'},
+    {0x23, '7'},
+    {0x27, '8'},
+    {0x2f, '9'},
+    {0x3f, '0'},
+    {0x00, ' '},
+    {0x29, '/'},
+    {0x00, ' '}, // Sapce
+  ////////////////////*
+*/
